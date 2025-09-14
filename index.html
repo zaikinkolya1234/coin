@@ -43,6 +43,7 @@
       autoplay
       muted
       playsinline
+      webkit-playsinline
       preload="auto"
       loop
       src="https://raw.githubusercontent.com/zaikinkolya1234/coin/refs/heads/main/110661-689510387_medium.mp4">
@@ -72,25 +73,49 @@
   </div>
 
   <script>
-    // Блокируем прокрутку, пока показываем прелоадер
     document.documentElement.classList.add('no-scroll');
     document.body.classList.add('no-scroll');
+
+    // >>> фиксируем момент старта
+    const loaderStartTime = Date.now();
 
     function hideLoader() {
       const loader = document.getElementById('loader');
       if (!loader || loader.classList.contains('hide')) return;
-      loader.classList.add('hide');
-      document.documentElement.classList.remove('no-scroll');
-      document.body.classList.remove('no-scroll');
-      setTimeout(() => loader.remove(), 450);
+
+      const elapsed = Date.now() - loaderStartTime;
+      const wait = Math.max(0, 2000 - elapsed); // >>> ждём, чтобы минимум 2 сек
+      setTimeout(() => {
+        loader.classList.add('hide');
+        document.documentElement.classList.remove('no-scroll');
+        document.body.classList.remove('no-scroll');
+        setTimeout(() => loader.remove(), 450);
+      }, wait);
     }
 
-    // Скрываем, когда страница загружена
-    window.addEventListener('load', hideLoader);
-    // Запасной таймаут (10 сек)
-    setTimeout(hideLoader, 10000);
+    // >>> гарантированный запуск видео
+    function primeLoaderVideo() {
+      const v = document.getElementById('loaderVideo');
+      if (!v) return;
+      v.muted = true;
+      v.setAttribute('muted', '');
+      v.setAttribute('playsinline', '');
+      v.setAttribute('webkit-playsinline', '');
+      v.load();
+      const tryPlay = () => v.play().catch(() => {
+        const resume = () => {
+          v.play().finally(() => document.removeEventListener('pointerdown', resume));
+        };
+        document.addEventListener('pointerdown', resume, { once: true });
+      });
+      tryPlay();
+    }
+    document.addEventListener('DOMContentLoaded', primeLoaderVideo);
 
-    // ==== Ваше приложение ====
+    window.addEventListener('load', hideLoader);
+    setTimeout(hideLoader, 10000); // запасной таймер
+
+    // ==== Приложение ====
     const tg = window.Telegram.WebApp;
     tg.expand();
     const user = tg.initDataUnsafe && tg.initDataUnsafe.user;
@@ -130,7 +155,7 @@
       latestPrice = parseFloat(data.p);
       if (!firstTickDone) {
         firstTickDone = true;
-        hideLoader(); // прячем прелоадер по первым данным
+        hideLoader();
       }
     };
 
