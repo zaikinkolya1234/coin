@@ -80,14 +80,19 @@
         }
 
         let tokens = 0;
-        function updateTokens() {
+
+        function renderTokens() {
             tokensEl.textContent = `Токены: ${tokens}`;
+        }
+
+        function saveTokens() {
             fetch(`/tokens/${userId}`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ tokens })
             });
         }
+
         async function loadTokens() {
             try {
                 const res = await fetch(`/tokens/${userId}`);
@@ -100,8 +105,9 @@
             } catch (e) {
                 tokens = 10000;
             }
-            updateTokens();
+            renderTokens();
         }
+
         loadTokens();
 
         function showApp() {
@@ -190,7 +196,8 @@
             } else {
                 tokens -= betAmount;
             }
-            updateTokens();
+            renderTokens();
+            saveTokens();
             durationInput.disabled = false;
             betInput.disabled = false;
             upBtn.disabled = false;
