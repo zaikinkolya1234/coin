@@ -1,245 +1,154 @@
 <!DOCTYPE html>
 <html lang="ru">
 <head>
-  <meta charset="UTF-8" />
-  <title>BTC Price App</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <script src="https://telegram.org/js/telegram-web-app.js"></script>
-  <style>
-    /* Оверлей загрузки */
-    html.no-scroll, body.no-scroll { overflow: hidden; height: 100%; }
-
-    #loader {
-      position: fixed; inset: 0;
-      display: flex; align-items: center; justify-content: center;
-      background: #000;
-      z-index: 9999;
-      opacity: 1; transition: opacity .4s ease;
-    }
-    #loader.hide { opacity: 0; }
-
-    #loader video {
-      max-width: 100vw; max-height: 100vh;
-      width: 100%; height: 100%;
-      object-fit: cover;
-      background: #000;
-    }
-
-    /* Основные стили приложения */
-    body { font-family: Arial, sans-serif; text-align: center; margin-top: 20px; }
-    #header { display: flex; justify-content: space-between; margin-bottom: 20px; padding: 0 10px; }
-    #tokens, #username { font-size: 20px; }
-    #price { font-size: 32px; font-weight: bold; }
-    #controls { margin-top: 40px; }
-    #controls input { width: 80px; margin: 0 5px; }
-    #countdown { margin-top: 20px; font-size: 24px; }
-  </style>
+    <meta charset="UTF-8">
+    <title>BTC Price App</title>
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+    <style>
+        body {font-family: Arial, sans-serif; text-align: center; margin-top: 20px;}
+        #header {display: flex; justify-content: space-between; margin-bottom: 20px; padding: 0 10px;}
+        #tokens, #username {font-size: 20px;}
+        #price {font-size: 32px; font-weight: bold;}
+        #controls {margin-top: 40px;}
+        #controls input {width: 80px; margin: 0 5px;}
+        #countdown {margin-top: 20px; font-size: 24px;}
+    </style>
 </head>
 <body>
-  <!-- Прелоадер с видео -->
-  <div id="loader" aria-label="Загрузка">
-    <video
-      id="loaderVideo"
-      autoplay
-      muted
-      playsinline
-      webkit-playsinline
-      preload="auto"
-      loop
-      src="https://raw.githubusercontent.com/zaikinkolya1234/coin/refs/heads/main/110661-689510387_medium.mp4">
-      Ваш браузер не поддерживает воспроизведение видео.
-    </video>
-  </div>
-
-  <div id="app">
     <div id="header">
-      <div id="tokens"></div>
-      <div id="username"></div>
+        <div id="tokens"></div>
+        <div id="username"></div>
     </div>
     <div id="price">Загрузка...</div>
     <div id="time"></div>
 
     <div id="controls">
-      <label>Время (с):
-        <input type="number" id="duration" min="10" max="1800" value="10">
-      </label>
-      <label>Ставка:
-        <input type="number" id="bet" min="1" max="100" value="1">
-      </label>
-      <button id="up">Up</button>
-      <button id="down">Down</button>
+        <label>Время (с):
+            <input type="number" id="duration" min="10" max="1800" value="10">
+        </label>
+        <label>Ставка:
+            <input type="number" id="bet" min="1" max="100" value="1">
+        </label>
+        <button id="up">Up</button>
+        <button id="down">Down</button>
     </div>
     <div id="countdown"></div>
-  </div>
 
-  <script>
-    document.documentElement.classList.add('no-scroll');
-    document.body.classList.add('no-scroll');
+    <script>
+        const tg = window.Telegram.WebApp;
+        tg.expand();
+        const user = tg.initDataUnsafe && tg.initDataUnsafe.user;
+        const userEl = document.getElementById('username');
+        const tokensEl = document.getElementById('tokens');
+        let userId = 'guest';
+        if (user) {
+            userId = user.id;
+            if (user.username) {
+                userEl.textContent = user.username;
+            } else {
+                userEl.textContent = `ID: ${user.id}`;
+            }
+        } else {
+            userEl.textContent = 'Гость';
+        }
 
-    // >>> фиксируем момент старта
-    const loaderStartTime = Date.now();
+        const tokenKey = `tokens_${userId}`;
+        let tokens = parseInt(localStorage.getItem(tokenKey), 10);
+        if (isNaN(tokens)) tokens = 10000;
+        function updateTokens() {
+            tokensEl.textContent = `Токены: ${tokens}`;
+            localStorage.setItem(tokenKey, tokens);
+        }
+        updateTokens();
 
-    function hideLoader() {
-      const loader = document.getElementById('loader');
-      if (!loader || loader.classList.contains('hide')) return;
-
-      const elapsed = Date.now() - loaderStartTime;
-      const wait = Math.max(0, 2000 - elapsed); // >>> ждём, чтобы минимум 2 сек
-      setTimeout(() => {
-        loader.classList.add('hide');
-        document.documentElement.classList.remove('no-scroll');
-        document.body.classList.remove('no-scroll');
-        setTimeout(() => loader.remove(), 450);
-      }, wait);
-    }
-
-    // >>> гарантированный запуск видео
-    function primeLoaderVideo() {
-      const v = document.getElementById('loaderVideo');
-      if (!v) return;
-      v.muted = true;
-      v.setAttribute('muted', '');
-      v.setAttribute('playsinline', '');
-      v.setAttribute('webkit-playsinline', '');
-      v.load();
-      const tryPlay = () => v.play().catch(() => {
-        const resume = () => {
-          v.play().finally(() => document.removeEventListener('pointerdown', resume));
+        const priceEl = document.getElementById('price');
+        const timeEl = document.getElementById('time');
+        const ws = new WebSocket('wss://stream.binance.com:9443/ws/btcusdt@trade');
+        let latestPrice = null;
+        let lastDisplayed = null;
+        ws.onmessage = (event) => {
+            const data = JSON.parse(event.data);
+            latestPrice = parseFloat(data.p);
         };
-        document.addEventListener('pointerdown', resume, { once: true });
-      });
-      tryPlay();
-    }
-    document.addEventListener('DOMContentLoaded', primeLoaderVideo);
 
-    window.addEventListener('load', hideLoader);
-    setTimeout(hideLoader, 10000); // запасной таймер
+        setInterval(() => {
+            if (latestPrice !== null) {
+                const formatted = latestPrice.toFixed(2);
+                if (lastDisplayed !== null) {
+                    if (formatted > lastDisplayed) {
+                        priceEl.style.color = 'green';
+                    } else if (formatted < lastDisplayed) {
+                        priceEl.style.color = 'red';
+                    } else {
+                        priceEl.style.color = 'black';
+                    }
+                }
+                priceEl.textContent = formatted;
+                lastDisplayed = formatted;
+            }
+            timeEl.textContent = new Date().toLocaleTimeString();
+        }, 1000);
 
-    // ==== Приложение ====
-    const tg = window.Telegram.WebApp;
-    tg.expand();
-    const user = tg.initDataUnsafe && tg.initDataUnsafe.user;
-    const userEl = document.getElementById('username');
-    const tokensEl = document.getElementById('tokens');
-    let userId = 'guest';
-    if (user) {
-      userId = user.id;
-      if (user.username) {
-        userEl.textContent = user.username;
-      } else {
-        userEl.textContent = `ID: ${user.id}`;
-      }
-    } else {
-      userEl.textContent = 'Гость';
-    }
+        const durationInput = document.getElementById('duration');
+        const betInput = document.getElementById('bet');
+        const upBtn = document.getElementById('up');
+        const downBtn = document.getElementById('down');
+        const countdownEl = document.getElementById('countdown');
+        let betActive = false;
+        let betPrice = null;
+        let countdownTimer = null;
+        let betDirection = null;
 
-    const tokenKey = `tokens_${userId}`;
-    let tokens = parseInt(localStorage.getItem(tokenKey), 10);
-    if (isNaN(tokens)) tokens = 10000;
-    function updateTokens() {
-      tokensEl.textContent = `Токены: ${tokens}`;
-      localStorage.setItem(tokenKey, tokens);
-    }
-    updateTokens();
+        function startBet(direction) {
+            if (betActive || latestPrice === null) return;
+            const duration = parseInt(durationInput.value, 10);
+            const betAmount = parseInt(betInput.value, 10);
+            if (isNaN(duration) || duration < 10 || duration > 1800) return;
+            if (isNaN(betAmount) || betAmount < 1 || betAmount > 100 || betAmount > tokens) return;
 
-    const priceEl = document.getElementById('price');
-    const timeEl = document.getElementById('time');
-    const ws = new WebSocket('wss://stream.binance.com:9443/ws/btcusdt@trade');
-    let latestPrice = null;
-    let lastDisplayed = null;
+            betActive = true;
+            betPrice = latestPrice;
+            betDirection = direction;
+            let remaining = duration;
+            countdownEl.textContent = remaining;
+            durationInput.disabled = true;
+            betInput.disabled = true;
+            upBtn.disabled = true;
+            downBtn.disabled = true;
 
-    let firstTickDone = false;
-
-    ws.onmessage = (event) => {
-      const data = JSON.parse(event.data);
-      latestPrice = parseFloat(data.p);
-      if (!firstTickDone) {
-        firstTickDone = true;
-        hideLoader();
-      }
-    };
-
-    ws.onerror = () => hideLoader();
-    ws.onclose = () => hideLoader();
-
-    setInterval(() => {
-      if (latestPrice !== null) {
-        const formatted = latestPrice.toFixed(2);
-        if (lastDisplayed !== null) {
-          if (formatted > lastDisplayed) {
-            priceEl.style.color = 'green';
-          } else if (formatted < lastDisplayed) {
-            priceEl.style.color = 'red';
-          } else {
-            priceEl.style.color = 'black';
-          }
+            countdownTimer = setInterval(() => {
+                remaining--;
+                countdownEl.textContent = remaining;
+                if (remaining <= 0) {
+                    clearInterval(countdownTimer);
+                    finishBet(betAmount);
+                }
+            }, 1000);
         }
-        priceEl.textContent = formatted;
-        lastDisplayed = formatted;
-      }
-      timeEl.textContent = new Date().toLocaleTimeString();
-    }, 1000);
 
-    const durationInput = document.getElementById('duration');
-    const betInput = document.getElementById('bet');
-    const upBtn = document.getElementById('up');
-    const downBtn = document.getElementById('down');
-    const countdownEl = document.getElementById('countdown');
-    let betActive = false;
-    let betPrice = null;
-    let countdownTimer = null;
-    let betDirection = null;
+        function finishBet(betAmount) {
+            betActive = false;
+            const finalPrice = latestPrice;
+            let win = false;
+            if (betDirection === 'up' && finalPrice > betPrice) win = true;
+            if (betDirection === 'down' && finalPrice < betPrice) win = true;
 
-    function startBet(direction) {
-      if (betActive || latestPrice === null) return;
-      const duration = parseInt(durationInput.value, 10);
-      const betAmount = parseInt(betInput.value, 10);
-      if (isNaN(duration) || duration < 10 || duration > 1800) return;
-      if (isNaN(betAmount) || betAmount < 1 || betAmount > 100 || betAmount > tokens) return;
-
-      betActive = true;
-      betPrice = latestPrice;
-      betDirection = direction;
-      let remaining = duration;
-      countdownEl.textContent = remaining;
-      durationInput.disabled = true;
-      betInput.disabled = true;
-      upBtn.disabled = true;
-      downBtn.disabled = true;
-
-      countdownTimer = setInterval(() => {
-        remaining--;
-        countdownEl.textContent = remaining;
-        if (remaining <= 0) {
-          clearInterval(countdownTimer);
-          finishBet(betAmount);
+            if (win) {
+                tokens += betAmount * 2;
+            } else {
+                tokens -= betAmount;
+            }
+            updateTokens();
+            durationInput.disabled = false;
+            betInput.disabled = false;
+            upBtn.disabled = false;
+            downBtn.disabled = false;
+            countdownEl.textContent = '';
+            alert(win ? 'Вы выиграли!' : 'Вы проиграли!');
         }
-      }, 1000);
-    }
 
-    function finishBet(betAmount) {
-      betActive = false;
-      const finalPrice = latestPrice;
-      let win = false;
-      if (betDirection === 'up' && finalPrice > betPrice) win = true;
-      if (betDirection === 'down' && finalPrice < betPrice) win = true;
-
-      if (win) {
-        tokens += betAmount * 2;
-      } else {
-        tokens -= betAmount;
-      }
-      updateTokens();
-      durationInput.disabled = false;
-      betInput.disabled = false;
-      upBtn.disabled = false;
-      downBtn.disabled = false;
-      countdownEl.textContent = '';
-      alert(win ? 'Вы выиграли!' : 'Вы проиграли!');
-    }
-
-    upBtn.addEventListener('click', () => startBet('up'));
-    downBtn.addEventListener('click', () => startBet('down'));
-  </script>
+        upBtn.addEventListener('click', () => startBet('up'));
+        downBtn.addEventListener('click', () => startBet('down'));
+    </script>
 </body>
 </html>
