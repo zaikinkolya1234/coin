@@ -5,12 +5,12 @@ import threading
 from flask import Flask, request, jsonify
 import telebot
 
-
 TOKEN = "8432849665:AAEsa0PTkBzpYZae0y6fsxiq38bRtpLFGvo"
 bot = telebot.TeleBot(TOKEN)
 
 app = Flask(__name__)
 TOKENS_FILE = "tokens.json"
+TOKENS_LOCK = threading.Lock()
 
 
 def load_tokens():
@@ -28,27 +28,47 @@ def save_tokens(data):
         json.dump(data, f)
 
 
+TOKENS = load_tokens()
+
+
+def get_user_tokens(user_id: int) -> int:
+    uid = str(user_id)
+    with TOKENS_LOCK:
+        tokens = TOKENS.get(uid)
+        if tokens is None:
+            tokens = 10000
+            TOKENS[uid] = tokens
+            save_tokens(TOKENS)
+        return tokens
+
+
+def set_user_tokens(user_id: int, tokens: int) -> None:
+    uid = str(user_id)
+    with TOKENS_LOCK:
+        TOKENS[uid] = tokens
+        save_tokens(TOKENS)
+
+
 @app.get("/tokens/<int:user_id>")
 def get_tokens(user_id: int):
-    data = load_tokens()
-    return jsonify({"tokens": data.get(str(user_id), 10000)})
+    tokens = get_user_tokens(user_id)
+    return jsonify({"tokens": tokens})
 
 
 @app.post("/tokens/<int:user_id>")
 def set_tokens(user_id: int):
-    data = load_tokens()
     payload = request.get_json(silent=True) or {}
     tokens = payload.get("tokens")
     if not isinstance(tokens, int):
         return jsonify({"error": "Invalid tokens"}), 400
-    data[str(user_id)] = tokens
-    save_tokens(data)
+    set_user_tokens(user_id, tokens)
     return jsonify({"status": "ok"})
 
 
 @bot.message_handler(commands=["start"])
 def start(message):
-    pass
+    tokens = get_user_tokens(message.from_user.id)
+    bot.reply_to(message, f"Ваш баланс: {tokens} токенов")
 
 
 def run_bot():
