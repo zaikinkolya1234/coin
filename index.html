@@ -12,27 +12,50 @@
         #controls {margin-top: 40px;}
         #controls input {width: 80px; margin: 0 5px;}
         #countdown {margin-top: 20px; font-size: 24px;}
+
+        #splash {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: black;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            z-index: 1000;
+        }
+        #splash video {
+            max-width: 100%;
+            height: auto;
+        }
     </style>
 </head>
 <body>
-    <div id="header">
-        <div id="tokens"></div>
-        <div id="username"></div>
+    <div id="splash">
+        <video id="introVideo" src="110661-689510387_medium.mp4" autoplay muted playsinline></video>
     </div>
-    <div id="price">Загрузка...</div>
-    <div id="time"></div>
 
-    <div id="controls">
-        <label>Время (с):
-            <input type="number" id="duration" min="10" max="1800" value="10">
-        </label>
-        <label>Ставка:
-            <input type="number" id="bet" min="1" max="100" value="1">
-        </label>
-        <button id="up">Up</button>
-        <button id="down">Down</button>
+    <div id="app" style="display:none">
+        <div id="header">
+            <div id="tokens"></div>
+            <div id="username"></div>
+        </div>
+        <div id="price">Загрузка...</div>
+        <div id="time"></div>
+
+        <div id="controls">
+            <label>Время (с):
+                <input type="number" id="duration" min="10" max="1800" value="10">
+            </label>
+            <label>Ставка:
+                <input type="number" id="bet" min="1" max="100" value="1">
+            </label>
+            <button id="up">Up</button>
+            <button id="down">Down</button>
+        </div>
+        <div id="countdown"></div>
     </div>
-    <div id="countdown"></div>
 
     <script>
         const tg = window.Telegram.WebApp;
@@ -40,6 +63,10 @@
         const user = tg.initDataUnsafe && tg.initDataUnsafe.user;
         const userEl = document.getElementById('username');
         const tokensEl = document.getElementById('tokens');
+        const splash = document.getElementById('splash');
+        const appEl = document.getElementById('app');
+        const introVideo = document.getElementById('introVideo');
+
         let userId = 'guest';
         if (user) {
             userId = user.id;
@@ -52,14 +79,39 @@
             userEl.textContent = 'Гость';
         }
 
-        const tokenKey = `tokens_${userId}`;
-        let tokens = parseInt(localStorage.getItem(tokenKey), 10);
-        if (isNaN(tokens)) tokens = 10000;
+        let tokens = 0;
         function updateTokens() {
             tokensEl.textContent = `Токены: ${tokens}`;
-            localStorage.setItem(tokenKey, tokens);
+            fetch(`/tokens/${userId}`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ tokens })
+            });
         }
-        updateTokens();
+        async function loadTokens() {
+            try {
+                const res = await fetch(`/tokens/${userId}`);
+                if (res.ok) {
+                    const data = await res.json();
+                    tokens = data.tokens;
+                } else {
+                    tokens = 10000;
+                }
+            } catch (e) {
+                tokens = 10000;
+            }
+            updateTokens();
+        }
+        loadTokens();
+
+        function showApp() {
+            splash.style.display = 'none';
+            appEl.style.display = 'block';
+        }
+        introVideo.play().catch(showApp);
+        introVideo.addEventListener('playing', () => {
+            setTimeout(showApp, 2000);
+        });
 
         const priceEl = document.getElementById('price');
         const timeEl = document.getElementById('time');
