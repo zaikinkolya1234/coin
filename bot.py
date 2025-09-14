@@ -48,7 +48,7 @@ def set_tokens(user_id: int):
 
 @bot.message_handler(commands=["start"])
 def start(message):
-    bot.reply_to(message, "Бот запущен")
+    pass
 
 
 def run_bot():
