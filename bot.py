@@ -9,7 +9,8 @@ TOKEN = "8432849665:AAEsa0PTkBzpYZae0y6fsxiq38bRtpLFGvo"
 bot = telebot.TeleBot(TOKEN)
 
 app = Flask(__name__)
-TOKENS_FILE = "tokens.json"
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+TOKENS_FILE = os.path.join(BASE_DIR, "tokens.json")
 TOKENS_LOCK = threading.Lock()
 
 
