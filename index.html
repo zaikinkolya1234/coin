@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <title>BTC Price App</title>
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
+    <script src="https://unpkg.com/lightweight-charts/dist/lightweight-charts.standalone.production.js"></script>
     <style>
         body {font-family: Arial, sans-serif; margin:0; padding:0; background:#0B0B0C; color:#C0C0C0;}
         .top-bar {display:flex; justify-content:space-between; align-items:center; padding:10px; background:#121214;}
@@ -15,10 +16,13 @@
         .bottom-nav {position:fixed; bottom:0; left:0; right:0; display:flex; justify-content:space-around; background:#121214; padding:10px 0;}
         .nav-btn {background:none; border:none; color:#C0C0C0; font-size:16px;}
         .nav-btn.active {color:#1E90FF;}
-        #price {font-size:32px; font-weight:bold;}
-        #controls {margin-top:40px;}
-        #controls input {width:80px; margin:0 5px;}
-        #countdown {margin-top:20px; font-size:24px;}
+        #chartContainer {height:300px;}
+        #betSettings {margin-top:20px; text-align:left;}
+        #betSettings label {display:block; margin-top:10px;}
+        #betSettings input[type="range"] {width:100%;}
+        #betSettings input[type="number"] {width:80px;}
+        #quickButtons button {margin-right:5px;}
+        #placeBet {margin-top:10px; width:100%; padding:10px;}
         #splash {position:fixed; top:0; left:0; right:0; bottom:0; background:black; display:flex; justify-content:center; align-items:center; z-index:1000;}
         #splash video {max-width:100%; height:auto;}
     </style>
@@ -39,19 +43,41 @@
         </div>
 
         <div id="screen-bets" class="screen active">
-            <div id="price">Загрузка...</div>
-            <div id="time"></div>
-            <div id="controls">
-                <label>Время (с):
-                    <input type="number" id="duration" min="10" max="300" value="10">
+            <div id="chartContainer"></div>
+            <button id="resetScale">Сброс масштаба</button>
+            <div id="betSettings">
+                <label>Время окончания
+                    <select id="timePreset">
+                        <option value="10">10s</option>
+                        <option value="30">30s</option>
+                        <option value="60" selected>60s</option>
+                        <option value="120">120s</option>
+                        <option value="180">180s</option>
+                        <option value="300">300s</option>
+                    </select>
+                    <input type="range" id="timeSlider" min="10" max="300" value="60">
+                    <span id="timeDisplay"></span>
                 </label>
-                <label>Ставка:
-                    <input type="number" id="bet" min="1" max="100" value="1">
+                <label>Ценовой диапазон
+                    <div>
+                        <input type="range" id="priceLeft">
+                        <input type="range" id="priceRight">
+                    </div>
+                    <div><span id="priceLeftDisplay"></span> - <span id="priceRightDisplay"></span></div>
                 </label>
-                <button id="up">Up</button>
-                <button id="down">Down</button>
+                <label>Размер ставки
+                    <div>
+                        <input type="number" id="amount" min="1" max="100" value="1">
+                        <span id="quickButtons">
+                            <button type="button" data-add="1">+1</button>
+                            <button type="button" data-add="5">+5</button>
+                            <button type="button" data-add="10">+10</button>
+                            <button type="button" id="maxBtn">MAX</button>
+                        </span>
+                    </div>
+                </label>
+                <button id="placeBet" disabled>Сделать ставку</button>
             </div>
-            <div id="countdown"></div>
         </div>
 
         <div id="screen-history" class="screen">
@@ -107,6 +133,7 @@
                 tokens = 10000;
             }
             renderTokens();
+            validate();
         }
         function saveTokens() {
             fetch(`/tokens/${userId}`, {
@@ -115,8 +142,6 @@
                 body:JSON.stringify({tokens})
             });
         }
-        loadTokens();
-
         const splash = document.getElementById('splash');
         const appEl = document.getElementById('app');
         const introVideo = document.getElementById('introVideo');
@@ -130,20 +155,58 @@
             setTimeout(showApp, 2000);
         });
 
-        const priceEl = document.getElementById('price');
-        const timeEl = document.getElementById('time');
         const cryptoSelect = document.getElementById('cryptoSelect');
+        const chartContainer = document.getElementById('chartContainer');
+        const resetScaleBtn = document.getElementById('resetScale');
+        const timePreset = document.getElementById('timePreset');
+        const timeSlider = document.getElementById('timeSlider');
+        const timeDisplay = document.getElementById('timeDisplay');
+        const priceLeft = document.getElementById('priceLeft');
+        const priceRight = document.getElementById('priceRight');
+        const priceLeftDisplay = document.getElementById('priceLeftDisplay');
+        const priceRightDisplay = document.getElementById('priceRightDisplay');
+        const amountInput = document.getElementById('amount');
+        const quickButtons = document.querySelectorAll('#quickButtons button[data-add]');
+        const maxBtn = document.getElementById('maxBtn');
+        const placeBetBtn = document.getElementById('placeBet');
 
         let ws = null;
         let latestPrice = null;
-        let lastDisplayed = null;
+        let basePrice = null;
+
+        const chart = LightweightCharts.createChart(chartContainer, {
+            layout:{background:{color:'#0B0B0C'}, textColor:'#C0C0C0'},
+            grid:{vertLines:{color:'#1f1f20'}, horzLines:{color:'#1f1f20'}},
+            crosshair:{mode:LightweightCharts.CrosshairMode.Normal},
+            handleScroll:true,
+            handleScale:true
+        });
+        const candleSeries = chart.addCandlestickSeries({
+            upColor:'green',
+            downColor:'red',
+            borderVisible:false,
+            wickUpColor:'green',
+            wickDownColor:'red'
+        });
 
         function connect(symbol) {
             if (ws) ws.close();
             ws = new WebSocket(`wss://stream.binance.com:9443/ws/${symbol}usdt@trade`);
+            let current = null;
             ws.onmessage = (event) => {
                 const data = JSON.parse(event.data);
-                latestPrice = parseFloat(data.p);
+                const price = parseFloat(data.p);
+                const ts = Math.floor(data.T / 1000);
+                latestPrice = price;
+                if (basePrice === null) setupPriceRange();
+                if (!current || ts > current.time) {
+                    if (current) candleSeries.update(current);
+                    current = { time: ts, open: price, high: price, low: price, close: price };
+                } else {
+                    current.high = Math.max(current.high, price);
+                    current.low = Math.min(current.low, price);
+                    current.close = price;
+                }
             };
         }
         connect('btc');
@@ -153,81 +216,101 @@
             connect(val);
         });
 
-        setInterval(() => {
-            if (latestPrice !== null) {
-                const formatted = latestPrice.toFixed(2);
-                if (lastDisplayed !== null) {
-                    if (formatted > lastDisplayed) priceEl.style.color = 'green';
-                    else if (formatted < lastDisplayed) priceEl.style.color = 'red';
-                    else priceEl.style.color = '#C0C0C0';
-                }
-                priceEl.textContent = formatted;
-                lastDisplayed = formatted;
-            }
-            timeEl.textContent = new Date().toLocaleTimeString();
-        }, 1000);
+        resetScaleBtn.addEventListener('click', () => {
+            chart.timeScale().fitContent();
+        });
 
-        const durationInput = document.getElementById('duration');
-        const betInput = document.getElementById('bet');
-        const upBtn = document.getElementById('up');
-        const downBtn = document.getElementById('down');
-        const countdownEl = document.getElementById('countdown');
-        let betActive = false;
-        let betPrice = null;
-        let countdownTimer = null;
-        let betDirection = null;
+        function displayTime(val){
+            const m = Math.floor(val/60);
+            const s = val % 60;
+            timeDisplay.textContent = m > 0 ? `Закроется через ${m}:${s.toString().padStart(2,'0')}` : `Закроется через ${s}`;
+        }
+        timePreset.addEventListener('change', () => {
+            timeSlider.value = timePreset.value;
+            displayTime(parseInt(timeSlider.value,10));
+            validate();
+        });
+        timeSlider.addEventListener('input', () => {
+            displayTime(parseInt(timeSlider.value,10));
+            validate();
+        });
+        displayTime(parseInt(timeSlider.value,10));
 
-        function startBet(direction) {
-            if (betActive || latestPrice === null) return;
-            const duration = parseInt(durationInput.value, 10);
-            const betAmount = parseInt(betInput.value, 10);
-            if (isNaN(duration) || duration < 10 || duration > 300) return;
-            if (isNaN(betAmount) || betAmount < 1 || betAmount > 100 || betAmount > tokens) return;
-
-            betActive = true;
-            betPrice = latestPrice;
-            betDirection = direction;
-            let remaining = duration;
-            countdownEl.textContent = remaining;
-            durationInput.disabled = true;
-            betInput.disabled = true;
-            upBtn.disabled = true;
-            downBtn.disabled = true;
-
-            countdownTimer = setInterval(() => {
-                remaining--;
-                countdownEl.textContent = remaining;
-                if (remaining <= 0) {
-                    clearInterval(countdownTimer);
-                    finishBet(betAmount);
-                }
-            }, 1000);
+        function setupPriceRange(){
+            if (latestPrice === null) return;
+            basePrice = latestPrice;
+            const pMin = basePrice * 0.99999;
+            const pMax = basePrice * 1.00001;
+            const step = 0.01;
+            priceLeft.min = priceRight.min = pMin.toFixed(2);
+            priceLeft.max = priceRight.max = pMax.toFixed(2);
+            priceLeft.step = priceRight.step = step;
+            priceLeft.value = pMin.toFixed(2);
+            priceRight.value = pMax.toFixed(2);
+            updatePriceDisplays();
         }
 
-        function finishBet(betAmount) {
-            betActive = false;
-            const finalPrice = latestPrice;
-            let win = false;
-            if (betDirection === 'up' && finalPrice > betPrice) win = true;
-            if (betDirection === 'down' && finalPrice < betPrice) win = true;
-
-            if (win) {
-                tokens += betAmount * 2;
-            } else {
-                tokens -= betAmount;
+        function updatePriceDisplays(){
+            priceLeftDisplay.textContent = parseFloat(priceLeft.value).toFixed(2);
+            priceRightDisplay.textContent = parseFloat(priceRight.value).toFixed(2);
+        }
+        priceLeft.addEventListener('input', () => {
+            if (parseFloat(priceLeft.value) > parseFloat(priceRight.value)){
+                priceLeft.value = priceRight.value;
             }
+            updatePriceDisplays();
+            validate();
+        });
+        priceRight.addEventListener('input', () => {
+            if (parseFloat(priceRight.value) < parseFloat(priceLeft.value)){
+                priceRight.value = priceLeft.value;
+            }
+            updatePriceDisplays();
+            validate();
+        });
+
+        function adjustAmount(delta){
+            let v = parseInt(amountInput.value,10)||0;
+            v += delta;
+            if (v>100) v=100;
+            if (v<1) v=1;
+            amountInput.value = v;
+            validate();
+        }
+        quickButtons.forEach(btn=>{
+            btn.addEventListener('click',()=>{
+                adjustAmount(parseInt(btn.dataset.add,10));
+            });
+        });
+        maxBtn.addEventListener('click',()=>{
+            amountInput.value = Math.min(100, tokens);
+            validate();
+        });
+        amountInput.addEventListener('input', validate);
+
+        function validate(){
+            const t = parseInt(timeSlider.value,10);
+            const a = parseInt(amountInput.value,10);
+            const l = parseFloat(priceLeft.value);
+            const r = parseFloat(priceRight.value);
+            const valid = t>=10 && t<=300 && a>=1 && a<=100 && a<=tokens && l<r && basePrice!==null;
+            placeBetBtn.disabled = !valid;
+            return valid;
+        }
+
+        placeBetBtn.addEventListener('click', () => {
+            if (!validate()) return;
+            alert('Ставка создана');
+            tokens -= parseInt(amountInput.value,10);
             renderTokens();
             saveTokens();
-            durationInput.disabled = false;
-            betInput.disabled = false;
-            upBtn.disabled = false;
-            downBtn.disabled = false;
-            countdownEl.textContent = '';
-            alert(win ? 'Вы выиграли!' : 'Вы проиграли!');
-        }
+            basePrice = null;
+            setupPriceRange();
+        });
 
-        upBtn.addEventListener('click', () => startBet('up'));
-        downBtn.addEventListener('click', () => startBet('down'));
+        setupPriceRange();
+
+        loadTokens();
 
         const navButtons = document.querySelectorAll('.nav-btn');
         const screens = document.querySelectorAll('.screen');
