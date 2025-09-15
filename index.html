@@ -5,30 +5,22 @@
     <title>BTC Price App</title>
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
     <style>
-        body {font-family: Arial, sans-serif; text-align: center; margin-top: 20px;}
-        #header {display: flex; justify-content: space-between; margin-bottom: 20px; padding: 0 10px;}
-        #tokens, #username {font-size: 20px;}
-        #price {font-size: 32px; font-weight: bold;}
-        #controls {margin-top: 40px;}
-        #controls input {width: 80px; margin: 0 5px;}
-        #countdown {margin-top: 20px; font-size: 24px;}
-
-        #splash {
-            position: fixed;
-            top: 0;
-            left: 0;
-            right: 0;
-            bottom: 0;
-            background: black;
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            z-index: 1000;
-        }
-        #splash video {
-            max-width: 100%;
-            height: auto;
-        }
+        body {font-family: Arial, sans-serif; margin:0; padding:0; background:#0B0B0C; color:#C0C0C0;}
+        .top-bar {display:flex; justify-content:space-between; align-items:center; padding:10px; background:#121214;}
+        .top-bar select {background:#121214; color:#C0C0C0; border:1px solid #1f1f20; border-radius:8px; padding:5px;}
+        .top-bar #tokens {font-size:18px;}
+        .user-icon {width:32px; height:32px; border-radius:50%; background:#1f1f20; display:flex; align-items:center; justify-content:center; color:#C0C0C0; font-weight:bold;}
+        .screen {display:none; padding:20px; text-align:center;}
+        .screen.active {display:block;}
+        .bottom-nav {position:fixed; bottom:0; left:0; right:0; display:flex; justify-content:space-around; background:#121214; padding:10px 0;}
+        .nav-btn {background:none; border:none; color:#C0C0C0; font-size:16px;}
+        .nav-btn.active {color:#1E90FF;}
+        #price {font-size:32px; font-weight:bold;}
+        #controls {margin-top:40px;}
+        #controls input {width:80px; margin:0 5px;}
+        #countdown {margin-top:20px; font-size:24px;}
+        #splash {position:fixed; top:0; left:0; right:0; bottom:0; background:black; display:flex; justify-content:center; align-items:center; z-index:1000;}
+        #splash video {max-width:100%; height:auto;}
     </style>
 </head>
 <body>
@@ -37,62 +29,71 @@
     </div>
 
     <div id="app" style="display:none">
-        <div id="header">
-            <div id="tokens"></div>
-            <div id="username"></div>
+        <div class="top-bar">
+            <select id="cryptoSelect">
+                <option value="btc">Bitcoin</option>
+                <option value="eth">Ethereum</option>
+            </select>
+            <div id="tokens">Монеты: 0</div>
+            <div id="userIcon" class="user-icon"></div>
         </div>
-        <div id="price">Загрузка...</div>
-        <div id="time"></div>
 
-        <div id="controls">
-            <label>Время (с):
-                <input type="number" id="duration" min="10" max="1800" value="10">
-            </label>
-            <label>Ставка:
-                <input type="number" id="bet" min="1" max="100" value="1">
-            </label>
-            <button id="up">Up</button>
-            <button id="down">Down</button>
+        <div id="screen-bets" class="screen active">
+            <div id="price">Загрузка...</div>
+            <div id="time"></div>
+            <div id="controls">
+                <label>Время (с):
+                    <input type="number" id="duration" min="10" max="300" value="10">
+                </label>
+                <label>Ставка:
+                    <input type="number" id="bet" min="1" max="100" value="1">
+                </label>
+                <button id="up">Up</button>
+                <button id="down">Down</button>
+            </div>
+            <div id="countdown"></div>
         </div>
-        <div id="countdown"></div>
+
+        <div id="screen-history" class="screen">
+            История
+        </div>
+
+        <div id="screen-deposit" class="screen">
+            Пополнить
+        </div>
+
+        <div id="screen-account" class="screen">
+            Личный кабинет
+        </div>
+
+        <div class="bottom-nav">
+            <button class="nav-btn active" data-target="screen-bets">Ставки</button>
+            <button class="nav-btn" data-target="screen-history">История</button>
+            <button class="nav-btn" data-target="screen-deposit">Пополнить</button>
+            <button class="nav-btn" data-target="screen-account">Личный кабинет</button>
+        </div>
     </div>
 
     <script>
         const tg = window.Telegram.WebApp;
         tg.expand();
         const user = tg.initDataUnsafe && tg.initDataUnsafe.user;
-        const userEl = document.getElementById('username');
-        const tokensEl = document.getElementById('tokens');
-        const splash = document.getElementById('splash');
-        const appEl = document.getElementById('app');
-        const introVideo = document.getElementById('introVideo');
+        const userIcon = document.getElementById('userIcon');
 
         let userId = 'guest';
         if (user) {
             userId = user.id;
-            if (user.username) {
-                userEl.textContent = user.username;
-            } else {
-                userEl.textContent = `ID: ${user.id}`;
-            }
+            const initials = (user.username ? user.username[0] : (user.first_name || '?')[0] || '?').toUpperCase();
+            userIcon.textContent = initials;
         } else {
-            userEl.textContent = 'Гость';
+            userIcon.textContent = 'G';
         }
 
+        const tokensEl = document.getElementById('tokens');
         let tokens = 0;
-
         function renderTokens() {
-            tokensEl.textContent = `Токены: ${tokens}`;
+            tokensEl.textContent = `Монеты: ${tokens}`;
         }
-
-        function saveTokens() {
-            fetch(`/tokens/${userId}`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ tokens })
-            });
-        }
-
         async function loadTokens() {
             try {
                 const res = await fetch(`/tokens/${userId}`);
@@ -107,8 +108,18 @@
             }
             renderTokens();
         }
-
+        function saveTokens() {
+            fetch(`/tokens/${userId}`, {
+                method:'POST',
+                headers:{'Content-Type':'application/json'},
+                body:JSON.stringify({tokens})
+            });
+        }
         loadTokens();
+
+        const splash = document.getElementById('splash');
+        const appEl = document.getElementById('app');
+        const introVideo = document.getElementById('introVideo');
 
         function showApp() {
             splash.style.display = 'none';
@@ -121,25 +132,34 @@
 
         const priceEl = document.getElementById('price');
         const timeEl = document.getElementById('time');
-        const ws = new WebSocket('wss://stream.binance.com:9443/ws/btcusdt@trade');
+        const cryptoSelect = document.getElementById('cryptoSelect');
+
+        let ws = null;
         let latestPrice = null;
         let lastDisplayed = null;
-        ws.onmessage = (event) => {
-            const data = JSON.parse(event.data);
-            latestPrice = parseFloat(data.p);
-        };
+
+        function connect(symbol) {
+            if (ws) ws.close();
+            ws = new WebSocket(`wss://stream.binance.com:9443/ws/${symbol}usdt@trade`);
+            ws.onmessage = (event) => {
+                const data = JSON.parse(event.data);
+                latestPrice = parseFloat(data.p);
+            };
+        }
+        connect('btc');
+
+        cryptoSelect.addEventListener('change', () => {
+            const val = cryptoSelect.value;
+            connect(val);
+        });
 
         setInterval(() => {
             if (latestPrice !== null) {
                 const formatted = latestPrice.toFixed(2);
                 if (lastDisplayed !== null) {
-                    if (formatted > lastDisplayed) {
-                        priceEl.style.color = 'green';
-                    } else if (formatted < lastDisplayed) {
-                        priceEl.style.color = 'red';
-                    } else {
-                        priceEl.style.color = 'black';
-                    }
+                    if (formatted > lastDisplayed) priceEl.style.color = 'green';
+                    else if (formatted < lastDisplayed) priceEl.style.color = 'red';
+                    else priceEl.style.color = '#C0C0C0';
                 }
                 priceEl.textContent = formatted;
                 lastDisplayed = formatted;
@@ -161,7 +181,7 @@
             if (betActive || latestPrice === null) return;
             const duration = parseInt(durationInput.value, 10);
             const betAmount = parseInt(betInput.value, 10);
-            if (isNaN(duration) || duration < 10 || duration > 1800) return;
+            if (isNaN(duration) || duration < 10 || duration > 300) return;
             if (isNaN(betAmount) || betAmount < 1 || betAmount > 100 || betAmount > tokens) return;
 
             betActive = true;
@@ -208,6 +228,17 @@
 
         upBtn.addEventListener('click', () => startBet('up'));
         downBtn.addEventListener('click', () => startBet('down'));
+
+        const navButtons = document.querySelectorAll('.nav-btn');
+        const screens = document.querySelectorAll('.screen');
+        navButtons.forEach(btn => {
+            btn.addEventListener('click', () => {
+                navButtons.forEach(b => b.classList.remove('active'));
+                screens.forEach(s => s.classList.remove('active'));
+                btn.classList.add('active');
+                document.getElementById(btn.dataset.target).classList.add('active');
+            });
+        });
     </script>
 </body>
 </html>
