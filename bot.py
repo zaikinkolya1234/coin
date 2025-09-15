@@ -5,6 +5,6 @@ bot = telebot.TeleBot(TOKEN)
 
 # Обработка команды /start
 @bot.message_handler(commands=["start"])
-def start():
+def start(message):
     pass
 bot.polling(none_stop=True)
